@@ -2,6 +2,8 @@ import {
     Document, Packer, Paragraph, TextRun, Table, TableRow, 
     TableCell, WidthType, BorderStyle, HeadingLevel, AlignmentType, ExternalHyperlink 
 } from "docx";
+import jsPDF from "jspdf";
+import "jspdf-autotable";
 import { formatIDR, getUseCaseComplexity, getActorComplexity } from "../constants.js";
 
 /**
@@ -312,4 +314,245 @@ export const generateWordDocument = async (project, calc) => {
     a.download = `CEISA_Kajian_${project.nama.replace(/\s+/g, '_')}.docx`;
     a.click();
     window.URL.revokeObjectURL(url);
+};
+
+/**
+ * Generate and download PDF document
+ */
+export const generatePDFDocument = async (project, calc) => {
+    const doc = new jsPDF();
+    let yPosition = 20;
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 15;
+    const maxWidth = pageWidth - (2 * margin);
+
+    // Helper function to add heading
+    const addHeading = (text, level = 1) => {
+        if (yPosition > pageHeight - 30) {
+            doc.addPage();
+            yPosition = 20;
+        }
+        const fontSize = level === 1 ? 14 : level === 2 ? 12 : 10;
+        const bold = level <= 2;
+        doc.setFontSize(fontSize);
+        doc.setFont(undefined, bold ? "bold" : "normal");
+        const lines = doc.splitTextToSize(text, maxWidth);
+        doc.text(lines, margin, yPosition);
+        yPosition += lines.length * 7 + 5;
+    };
+
+    // Helper function to add text
+    const addText = (text, options = {}) => {
+        if (yPosition > pageHeight - 20) {
+            doc.addPage();
+            yPosition = 20;
+        }
+        doc.setFontSize(options.fontSize || 10);
+        doc.setFont(undefined, options.bold ? "bold" : "normal");
+        const lines = doc.splitTextToSize(text, maxWidth);
+        doc.text(lines, margin, yPosition);
+        yPosition += lines.length * 5 + (options.spacing || 2);
+    };
+
+    // --- TITLE ---
+    doc.setFontSize(16);
+    doc.setFont(undefined, "bold");
+    doc.text("DOKUMEN PENELITIAN & KAK", pageWidth / 2, yPosition, { align: "center" });
+    yPosition += 10;
+    
+    doc.setFontSize(12);
+    doc.text(`CEISA 4.0 Proyek: ${project.nama}`, pageWidth / 2, yPosition, { align: "center" });
+    yPosition += 15;
+
+    // --- SECTION 1: KAJIAN KEBUTUHAN ---
+    addHeading("1. Kajian Kebutuhan & Informasi Umum");
+    addText(`Nama Proyek: ${project.nama}`, { spacing: 3 });
+    addText(`Unit Pengampu: ${project.pengampu}`, { spacing: 3 });
+    addText(`Unit Penanggung Jawab: ${project.unitPenanggungJawab}`, { spacing: 3 });
+    addText(`PIC: ${project.namaPIC} (${project.kontakPIC})`, { spacing: 5 });
+
+    addHeading("Latar Belakang & Masalah", 2);
+    addText(project.latarBelakang || "N/A", { spacing: 3 });
+    addText(`Masalah Utama: ${project.masalahIsu || "N/A"}`, { spacing: 5 });
+
+    addHeading("Target & Outcome", 2);
+    addText(`Target Penyelesaian: ${project.targetPenyelesaian}`, { spacing: 3 });
+    addText(`Target Outcome: ${project.targetOutcome}`, { spacing: 3 });
+    addText(`Business Value: ${project.businessValue}`, { spacing: 5 });
+
+    // --- SECTION 2: COST ESTIMATION ---
+    addHeading("2. Estimasi Biaya (RAB) & KAK");
+    
+    const costTableData = calc.kakTableData.map((item) => [
+        item.name,
+        `${item.percent}%`,
+        item.effortMM.toFixed(3),
+        item.roleName,
+        formatIDR(item.rate),
+        formatIDR(item.cost)
+    ]);
+
+    costTableData.push([
+        "Total Effort Cost",
+        "",
+        "",
+        "",
+        "",
+        formatIDR(calc.runningTotalCost)
+    ]);
+    costTableData.push([
+        "Estimasi Garansi (25%)",
+        "",
+        "",
+        "",
+        "",
+        formatIDR(calc.warrantyCost)
+    ]);
+    costTableData.push([
+        "Sub Total",
+        "",
+        "",
+        "",
+        "",
+        formatIDR(calc.subTotal)
+    ]);
+    costTableData.push([
+        "PPN (11%)",
+        "",
+        "",
+        "",
+        "",
+        formatIDR(calc.ppn)
+    ]);
+    costTableData.push([
+        "TOTAL BIAYA ESTIMASI (RAB)",
+        "",
+        "",
+        "",
+        "",
+        formatIDR(calc.grandTotal)
+    ]);
+
+    doc.autoTable({
+        head: [["Fase / Aktivitas", "%", "MM", "Role", "Rate", "Biaya"]],
+        body: costTableData,
+        startY: yPosition,
+        margin: margin,
+        theme: "grid",
+        headStyles: { fillColor: 30, textColor: 255, fontStyle: "bold" },
+        bodyStyles: { textColor: 0 },
+        alternateRowStyles: { fillColor: 240 }
+    });
+
+    yPosition = doc.internal.pageSize.getHeight() - doc.lastAutoTable.finalY - 10;
+    addText(`Total Man-Month: ${calc.totalManMonths.toFixed(2)} MM`, { bold: true, spacing: 10 });
+
+    // --- SECTION 3: UCP CALCULATION ---
+    addHeading("3. Detail Perhitungan UCP");
+    
+    addHeading("A. Daftar Aktor (UAW)", 2);
+    const actorTableData = project.actors.map((actor, idx) => [
+        (idx + 1).toString(),
+        actor.name,
+        actor.desc || "-",
+        actor.type,
+        getActorComplexity(actor.type).weight.toString()
+    ]);
+
+    doc.autoTable({
+        head: [["No", "Aktor", "Deskripsi", "Tipe", "UAW"]],
+        body: actorTableData,
+        startY: yPosition,
+        margin: margin,
+        theme: "grid",
+        headStyles: { fillColor: 225, textColor: 0, fontStyle: "bold" }
+    });
+
+    yPosition = doc.lastAutoTable.finalY + 5;
+
+    addHeading("B. Daftar Use Case (UUCW)", 2);
+    const ucTableData = project.useCases.map((uc, idx) => [
+        (idx + 1).toString(),
+        uc.name,
+        uc.subSystem || "-",
+        uc.transactions.toString(),
+        getUseCaseComplexity(uc.transactions).weight.toString()
+    ]);
+
+    doc.autoTable({
+        head: [["No", "Use Case", "Sub-System", "Trans.", "UUCW"]],
+        body: ucTableData,
+        startY: yPosition,
+        margin: margin,
+        theme: "grid",
+        headStyles: { fillColor: 225, textColor: 0, fontStyle: "bold" }
+    });
+
+    yPosition = doc.lastAutoTable.finalY + 5;
+    addHeading("C. Final Complexity Index", 2);
+    addText(`TCF: ${calc.tcf.toFixed(3)} | EF: ${calc.ef.toFixed(3)} | Final UCP: ${calc.ucp.toFixed(2)}`, { bold: true, spacing: 10 });
+
+    // --- SECTION 4: BRD ---
+    addHeading("4. Kebutuhan Fungsional (BRD)");
+    const brdTableData = (project.kebutuhanFungsional || []).map((req) => [
+        req.id,
+        req.deskripsi,
+        req.prioritas
+    ]);
+
+    doc.autoTable({
+        head: [["ID", "Deskripsi Kebutuhan Fungsional", "Prioritas"]],
+        body: brdTableData,
+        startY: yPosition,
+        margin: margin,
+        theme: "grid",
+        headStyles: { fillColor: 225, textColor: 0, fontStyle: "bold" },
+        columnStyles: { 0: { cellWidth: 15 }, 1: { cellWidth: "auto" }, 2: { cellWidth: 30 } }
+    });
+
+    yPosition = doc.lastAutoTable.finalY + 5;
+
+    // --- SECTION 5: FSD ---
+    addHeading("5. Functional Specification (FSD)");
+    const fsdTableData = (project.fsdDesign || []).map((item) => [
+        item.item,
+        item.pic,
+        item.link || "-"
+    ]);
+
+    doc.autoTable({
+        head: [["Diagram / Dokumen", "PIC", "Link Referensi"]],
+        body: fsdTableData,
+        startY: yPosition,
+        margin: margin,
+        theme: "grid",
+        headStyles: { fillColor: 225, textColor: 0, fontStyle: "bold" }
+    });
+
+    yPosition = doc.lastAutoTable.finalY + 5;
+
+    // --- SECTION 6: PROJECT CHARTER ---
+    addHeading("6. Project Charter & Timeline");
+    addText(`Lingkup Kerja: ${project.charter.scope || "N/A"}`, { spacing: 5 });
+    
+    addHeading("Jadwal Pelaksanaan", 2);
+    const timelineTableData = (project.charter.timeline || []).map((t) => [
+        t.milestone,
+        t.start,
+        t.end,
+        t.note || "-"
+    ]);
+
+    doc.autoTable({
+        head: [["Milestone", "Start", "End", "Note"]],
+        body: timelineTableData,
+        startY: yPosition,
+        margin: margin,
+        theme: "grid",
+        headStyles: { fillColor: 225, textColor: 0, fontStyle: "bold" }
+    });
+
+    // Save PDF
+    doc.save(`CEISA_Kajian_${project.nama.replace(/\s+/g, '_')}.pdf`);
 };

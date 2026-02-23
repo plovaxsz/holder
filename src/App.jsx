@@ -21,7 +21,7 @@ import {
 
 import { processDocumentWithAI } from './utils/aiProcessor.js';
 import { extractTextFromPdf, extractTextFromDocx } from './utils/fileHelpers.js';
-import { generateWordDocument } from './utils/docGenerator.js';
+import { generateWordDocument, generatePDFDocument } from './utils/docGenerator.js';
 
 // WARNING: Replace this with your actual key and move to .env for production
 const API_KEY = "AIzaSyD_rK7gKL86NliduYi-WQQIg1TG0cdQJdo";
@@ -241,6 +241,12 @@ function App() {
                 className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-xl font-bold text-sm"
              >
                 <Download className="w-4 h-4" /> Export Word
+             </button>
+             <button 
+                onClick={() => generatePDFDocument(project, calc)}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-500 px-6 py-2 rounded-xl font-bold text-sm"
+             >
+                <FileText className="w-4 h-4" /> Export PDF
              </button>
           </div>
         </div>
